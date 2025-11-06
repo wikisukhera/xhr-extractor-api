@@ -2,11 +2,19 @@ const puppeteer = require('puppeteer');
 
 async function findSquare(address) {
   const browser = await puppeteer.launch({
-    headless: true,
-    executablePath: '/usr/bin/chromium-browser',
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--single-process']
-  });
-
+  headless: true,
+  executablePath: '/usr/bin/chromium-browser',  // Render's built-in path
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-gpu',
+    '--disable-dev-shm-usage',
+    '--disable-web-security',
+    '--allow-running-insecure-content',
+    '--single-process',
+    '--no-zygote'
+  ]
+});
   const page = await browser.newPage();
   const matched = new Set();
   const pattern = /square\?id=\d+/i;
