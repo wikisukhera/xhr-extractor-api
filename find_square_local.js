@@ -2,14 +2,14 @@
 // usage: node find_square.js "<address_or_coords>"
 // Example: node find_square.js "316 E Okanogan Ave, Chelan Washington 98816"
 
-const puppeteer = require('puppeteer'); // Use full puppeteer for local launch
-const fs = require('fs');
+// find_square_local.js
+const puppeteer = require('puppeteer-core');
 
 async function findSquare(address) {
   const browser = await puppeteer.launch({
-    headless: 'new', // Modern headless mode
-    args: ['--no-sandbox', '--disable-setuid-sandbox'], // For stability on Windows
-    defaultViewport: { width: 1280, height: 800 },
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+    executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/tmp/chrome-linux/chrome'
   });
 
   const page = await browser.newPage();
