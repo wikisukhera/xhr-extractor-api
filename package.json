@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "build": "npx puppeteer browsers install chrome@142.0.7444.59 --platform linux64",
+    "build": "npx puppeteer browsers install chrome@142.0.7444.59 --platform linux",
     "start": "node server.js"
   },
   "dependencies": {
