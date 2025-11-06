@@ -12,23 +12,23 @@ app.get('/', (req, res) => {
   res.json({ message: 'XHR Extractor API is running!' });
 });
 
-// Copy Chrome from build cache to /tmp on cold start
-const CHROME_BUILD_PATH = '/vercel/.cache/puppeteer/chrome/linux-142.0.7444.59/chrome-linux64/chrome';
-const CHROME_RUNTIME_PATH = '/tmp/chrome-linux/chrome';
-const CHROME_DIR = '/tmp/chrome-linux';
+// Copy Chrome on cold start
+const BUILD_CHROME = '/vercel/.cache/puppeteer/chrome/linux-142.0.7444.59/chrome-linux64/chrome';
+const RUNTIME_CHROME = '/tmp/chrome';
+const RUNTIME_DIR = '/tmp';
 
-if (!fs.existsSync(CHROME_RUNTIME_PATH)) {
+if (!fs.existsSync(RUNTIME_CHROME)) {
   console.log('Copying Chrome to /tmp...');
-  fs.mkdirSync(CHROME_DIR, { recursive: true });
-  fs.copyFileSync(CHROME_BUILD_PATH, CHROME_RUNTIME_PATH);
-  fs.chmodSync(CHROME_RUNTIME_PATH, '755');
-  console.log('Chrome copied to /tmp');
+  fs.mkdirSync(RUNTIME_DIR, { recursive: true });
+  fs.copyFileSync(BUILD_CHROME, RUNTIME_CHROME);
+  fs.chmodSync(RUNTIME_CHROME, 0o755);
+  console.log('Chrome ready at /tmp/chrome');
 }
 
-// API endpoint
+// API
 app.post('/extract-xhr', async (req, res) => {
   const { address } = req.body;
-  if (!address) return res.status(400).json({ error: 'Address is required' });
+  if (!address) return res.status(400).json({ error: 'Address required' });
 
   try {
     const xhrUrls = await findSquare(address);
@@ -36,11 +36,10 @@ app.post('/extract-xhr', async (req, res) => {
       address,
       status: 'success',
       xhrUrls,
-      total: xhrUrls.length,
-      timestamp: new Date().toISOString()
+      total: xhrUrls.length
     });
   } catch (err) {
-    console.error('Puppeteer error:', err);
+    console.error('Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
