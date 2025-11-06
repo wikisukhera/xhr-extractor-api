@@ -1,13 +1,12 @@
 {
-  "builds": [
-    {
-      "src": "server.js",
-      "use": "@vercel/node"
+  "functions": {
+    "server.js": {
+      "maxDuration": 30
     }
-  ],
+  },
   "routes": [
     {
-      "src": "/extract-xhr",
+      "src": "/(.*)",
       "dest": "/server.js"
     }
   ]
