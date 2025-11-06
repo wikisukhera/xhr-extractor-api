@@ -3,16 +3,15 @@ const puppeteer = require('puppeteer');
 async function findSquare(address) {
   const browser = await puppeteer.launch({
   headless: true,
+  executablePath: '/opt/render/project/src/node_modules/puppeteer/.local-chromium/linux-*/chrome-linux/chrome',
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
+    '--disable-gpu',
     '--disable-dev-shm-usage',
-    '--disable-web-security',
     '--no-zygote',
     '--single-process'
-  ],
-  // Render downloads Chrome to this exact path — no wildcard needed
-  executablePath: '/opt/render/project/src/node_modules/puppeteer/.local-chromium/linux-*/chrome-linux/chrome'
+  ]
 });
   
   const page = await browser.newPage();
