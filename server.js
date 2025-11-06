@@ -5,6 +5,10 @@ const { findSquare } = require('./find_square_local');
 const app = express();
 app.use(express.json());
 
+app.get('/', (req, res) => {
+  res.json({ message: 'XHR Extractor API is running!' });
+});
+
 app.post('/extract-xhr', async (req, res) => {
   const { address } = req.body;
   if (!address) {
