@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
+    "build": "npx puppeteer browsers install chrome@142.0.7444.59 --platform linux64",
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "puppeteer": "^24.0.0"
+    "puppeteer-core": "^24.0.0"
   }
 }
