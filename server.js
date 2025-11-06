@@ -17,6 +17,7 @@ app.post('/extract-xhr', async (req, res) => {
     const urls = await findSquare(address);
     res.json({ status: 'success', xhrUrls: urls });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
