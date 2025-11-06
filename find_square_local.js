@@ -1,18 +1,13 @@
 // find_square_local.js
 const puppeteer = require('puppeteer-core');
-
-const CHROME_PATH = '/vercel/.cache/puppeteer/chrome/linux-142.0.7444.59/chrome-linux64/chrome';
+const chromium = require('@sparticuz/chromium');
 
 async function findSquare(address) {
   const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage'
-    ],
-    executablePath: CHROME_PATH
+    args: chromium.args,
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath(),
+    headless: chromium.headless,
   });
 
   const page = await browser.newPage();
@@ -20,8 +15,7 @@ async function findSquare(address) {
   const pattern = /square\?id=\d+/i;
 
   page.on('request', req => {
-    const url = req.url();
-    if (pattern.test(url)) matched.add(url);
+    if (pattern.test(req.url())) matched.add(req.url());
   });
 
   await page.goto('https://map.coveragemap.com/', { waitUntil: 'networkidle2', timeout: 30000 });
@@ -33,7 +27,7 @@ async function findSquare(address) {
   } catch (e) {}
 
   const input = await page.$('input[placeholder*="address" i]') || await page.$('input');
-  if (!input) throw new Error('Input not found');
+  if (!input) throw new Error('Search input not found');
 
   await input.click({ clickCount: 3 });
   await input.press('Backspace');
@@ -41,8 +35,8 @@ async function findSquare(address) {
 
   await new Promise(r => setTimeout(r, 1500));
 
-  const suggestion = await page.$('[role="listbox"]');
-  if (suggestion) {
+  const listbox = await page.$('[role="listbox"]');
+  if (listbox) {
     await page.click('[role="listbox"] [role="option"]');
   } else {
     await input.press('Enter');
@@ -54,9 +48,7 @@ async function findSquare(address) {
     const map = await page.$('canvas, .leaflet-container');
     if (map) {
       const box = await map.boundingBox();
-      const cx = box.x + box.width / 2;
-      const cy = box.y + box.height / 2;
-      await page.mouse.click(cx, cy);
+      await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
       await new Promise(r => setTimeout(r, 800));
     }
   }
