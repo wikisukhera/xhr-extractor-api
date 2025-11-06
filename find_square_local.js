@@ -1,19 +1,19 @@
 const puppeteer = require('puppeteer');
 
 async function findSquare(address) {
+  const puppeteer = require('puppeteer');
+
+async function findSquare(address) {
   const browser = await puppeteer.launch({
-  headless: true,
-  executablePath: '/usr/bin/chromium-browser',  // Render has this built-in
-  args: [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-web-security',
-    '--disable-features=IsolateOrigins,site-per-process',
-    '--no-zygote',
-    '--single-process'
-  ]
-});
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process'
+    ]
+  });
   
   const page = await browser.newPage();
   const matched = new Set();
