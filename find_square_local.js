@@ -1,185 +1,70 @@
-// find_square.js
-// usage: node find_square.js "<address_or_coords>"
-// Example: node find_square.js "316 E Okanogan Ave, Chelan Washington 98816"
-
 // find_square_local.js
 const puppeteer = require('puppeteer-core');
 
+const CHROME_PATH = '/vercel/.cache/puppeteer/chrome/linux-142.0.7444.59/chrome-linux64/chrome';
+
 async function findSquare(address) {
-const browser = await puppeteer.launch({
-  headless: true,
-  args: [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-gpu',
-    '--disable-dev-shm-usage',
-    '--disable-web-security',
-    '--allow-running-insecure-content'
-  ],
-  executablePath: '/tmp/chrome'
-});
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-gpu',
+      '--disable-dev-shm-usage'
+    ],
+    executablePath: CHROME_PATH
+  });
 
   const page = await browser.newPage();
-
-  // capture matching XHRs
   const matched = new Set();
-  const pattern = /square\?id=\d+/i; // Matches 'square?id=...' with extra params
+  const pattern = /square\?id=\d+/i;
 
   page.on('request', req => {
     const url = req.url();
-    if (pattern.test(url)) {
-      matched.add(url);
-      console.log(`Matched request: ${url}`);
-    }
-  });
-  page.on('response', async resp => {
-    try {
-      const url = resp.url();
-      if (pattern.test(url)) {
-        matched.add(url);
-        console.log(`Matched response: ${url}`);
-      }
-    } catch(e) {}
+    if (pattern.test(url)) matched.add(url);
   });
 
-  await page.goto('https://map.coveragemap.com/', { waitUntil: 'networkidle2', timeout: 60000 });
+  await page.goto('https://map.coveragemap.com/', { waitUntil: 'networkidle2', timeout: 30000 });
 
-  // dismiss popup if present
   try {
     await page.waitForSelector('svg.lucide-x', { timeout: 3000 });
     await page.click('svg.lucide-x');
     await new Promise(r => setTimeout(r, 600));
-  } catch(e){ /* no popup */ }
+  } catch (e) {}
 
-  // find input - try common selectors
-  const selectors = [
-    '//*[@id="root"]//input[contains(@placeholder,"address") or contains(@placeholder,"Address") or contains(@placeholder,"location") or contains(@placeholder,"search")]',
-    'input[placeholder*="address"]',
-    'input[type="search"]',
-    '#root input',
-    'input'
-  ];
+  const input = await page.$('input[placeholder*="address" i]') || await page.$('input');
+  if (!input) throw new Error('Input not found');
 
-  let inputHandle = null;
-  for (const sel of selectors) {
-    try {
-      if (sel.startsWith('//')) {
-        const [el] = await page.$x(sel);
-        if (el) { inputHandle = el; break; }
-      } else {
-        const el = await page.$(sel);
-        if (el) { inputHandle = el; break; }
-      }
-    } catch(e){}
-  }
-  if (!inputHandle) throw new Error('Search input not found');
+  await input.click({ clickCount: 3 });
+  await input.press('Backspace');
+  await input.type(address, { delay: 80 });
 
-  // Focus and robustly type: type full address, then do the backspace+left trick if needed
-  await inputHandle.focus();
-  await page.evaluate(el => { el.value = ''; el.focus(); }, inputHandle);
+  await new Promise(r => setTimeout(r, 1500));
 
-  // natural typing
-  console.log('Typing address...');
-  for (const ch of address) {
-    await inputHandle.type(ch, { delay: 80 }); // natural delay
-  }
-
-  // give suggestions some time
-  await new Promise(r => setTimeout(r, 1200));
-
-  // check if suggestion list exists; we look for role=listbox
-  let suggestionsVisible = await page.evaluate(() => !!document.querySelector('[role="listbox"]'));
-  console.log(`Suggestions visible: ${suggestionsVisible}`);
-  if (!suggestionsVisible) {
-    // backspace+left trick: try removing 1 and 2 chars
-    for (const n of [1,2]) {
-      for (let i=0;i<n;i++) {
-        try {
-          await inputHandle.press('Backspace');
-          await new Promise(r => setTimeout(r, 80));
-        } catch(e) {
-          console.log('Backspace failed, skipping...');
-        }
-      }
-      for (let i=0;i<n;i++) {
-        try {
-          await inputHandle.press('ArrowLeft');
-          await new Promise(r => setTimeout(r, 80));
-        } catch(e) {
-          console.log('ArrowLeft failed, skipping...');
-        }
-      }
-      // dispatch input event
-      await page.evaluate(el => el.dispatchEvent(new Event('input', { bubbles: true })), inputHandle);
-      await new Promise(r => setTimeout(r, 900));
-      suggestionsVisible = await page.evaluate(() => !!document.querySelector('[role="listbox"]'));
-      console.log(`Suggestions after trick (${n} chars): ${suggestionsVisible}`);
-      if (suggestionsVisible) break;
-    }
-  }
-
-  // If suggestions visible, try to click the first option
-  if (suggestionsVisible) {
-    try {
-      await page.click('[role="listbox"] [role="option"]');
-      await new Promise(r => setTimeout(r, 600));
-    } catch(e){}
+  const suggestion = await page.$('[role="listbox"]');
+  if (suggestion) {
+    await page.click('[role="listbox"] [role="option"]');
   } else {
-    // press Enter anyway (some flows use Enter)
-    await inputHandle.press('Enter');
-    await new Promise(r => setTimeout(r, 1000));
+    await input.press('Enter');
   }
 
-  // Wait briefly for network events triggered by selection/enter
-  await new Promise(r => setTimeout(r, 800));
+  await new Promise(r => setTimeout(r, 1000));
 
-  // check matched set
   if (matched.size === 0) {
-    // Click near the map center at multiple offsets to trigger pin XHRs
-    console.log('No matches yet, clicking map...');
-    let mapElem = await page.$('div.leaflet-container') || await page.$('div.mapboxgl-canvas') || await page.$('canvas') || await page.$('#root');
-    if (mapElem) {
-      const box = await mapElem.boundingBox();
-      const cx = box.x + box.width/2;
-      const cy = box.y + box.height/2;
-      const offsets = [[0,0],[10,0],[-10,0],[0,10],[0,-10],[20,0],[-20,0],[10,10],[-10,-10]];
-      for (const [dx,dy] of offsets) {
-        try {
-          await page.mouse.click(cx+dx, cy+dy);
-          console.log(`Clicked at (${dx},${dy})`);
-          await new Promise(r => setTimeout(r, 800));
-        } catch(e) {
-          console.log('Click failed, skipping...');
-        }
-        if (matched.size) break;
-      }
+    const map = await page.$('canvas, .leaflet-container');
+    if (map) {
+      const box = await map.boundingBox();
+      const cx = box.x + box.width / 2;
+      const cy = box.y + box.height / 2;
+      await page.mouse.click(cx, cy);
+      await new Promise(r => setTimeout(r, 800));
     }
   }
 
-  // final wait for any last XHRs
   await new Promise(r => setTimeout(r, 600));
-
   const result = Array.from(matched);
   await browser.close();
   return result;
 }
 
-// Run if invoked directly
-if (require.main === module) {
-  (async () => {
-    const address = process.argv.slice(2).join(' ');
-    if (!address) {
-      console.error('Usage: node find_square.js "<address>"');
-      process.exit(2);
-    }
-    try {
-      const res = await findSquare(address);
-      console.log(JSON.stringify({ xhrUrls: res }, null, 2));
-      process.exit(0);
-    } catch (err) {
-      console.error(err);
-      process.exit(3);
-    }
-  })();
-}
 module.exports = { findSquare };
