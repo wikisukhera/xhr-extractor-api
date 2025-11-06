@@ -6,11 +6,23 @@ async function findSquare(address) {
   let browser = null;
   
   try {
+    // Configure chromium for Vercel
+    const executablePath = await chromium.executablePath();
+    
     browser = await puppeteer.launch({
-      args: chromium.args,
+      args: [
+        ...chromium.args,
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        '--disable-setuid-sandbox',
+        '--no-first-run',
+        '--no-sandbox',
+        '--no-zygote',
+        '--single-process'
+      ],
       defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+      executablePath: executablePath,
+      headless: 'new',
     });
 
     const page = await browser.newPage();
