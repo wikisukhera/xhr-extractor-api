@@ -1,28 +1,14 @@
 // find_square_local.js
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
-
+const chromium = require('chrome-aws-lambda');
+const puppeteer = require('puppeteer-core'); // NOT puppeteer
 async function findSquare(address) {
   let browser = null;
-  
   try {
-    // Configure chromium for Vercel
-    const executablePath = await chromium.executablePath();
-    
     browser = await puppeteer.launch({
-      args: [
-        ...chromium.args,
-        '--disable-gpu',
-        '--disable-dev-shm-usage',
-        '--disable-setuid-sandbox',
-        '--no-first-run',
-        '--no-sandbox',
-        '--no-zygote',
-        '--single-process'
-      ],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: executablePath,
-      headless: 'new',
+      args: chromium.args,
+      executablePath: await chromium.executablePath,
+      headless: chromium.headless,
+      ignoreHTTPSErrors: true,
     });
 
     const page = await browser.newPage();
