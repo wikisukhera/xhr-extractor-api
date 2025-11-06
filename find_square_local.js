@@ -16,7 +16,7 @@ const browser = await puppeteer.launch({
     '--disable-web-security',
     '--allow-running-insecure-content'
   ],
-  executablePath: process.env.CHROME_PATH || '/tmp/chrome-linux/chrome'
+  executablePath: '/tmp/chrome'
 });
 
   const page = await browser.newPage();
