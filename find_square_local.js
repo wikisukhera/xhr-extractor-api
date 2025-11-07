@@ -2,9 +2,11 @@
  * find_square_local.js
  *
  * Robust, instrumented helper to find/search an address on map.coveragemap.com
- * Exports: async function findSquare(page, address) -> returns array of matched XHR URLs
+ * Flexible signature:
+ *   - async findSquare(page, address)   // if you already have a puppeteer Page
+ *   - async findSquare(address)         // function will launch/close its own browser/page
  *
- * Also runnable as a standalone script for local testing:
+ * Also runnable as a standalone script:
  *   node find_square_local.js "316 E Okanogan Ave, Chelan Washington 98816"
  */
 
@@ -12,47 +14,90 @@ const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
 
-async function findSquare(page, address) {
-  if (!page) throw new Error('page argument is required');
-  if (!address) throw new Error('address argument is required');
+/**
+ * Flexible findSquare
+ * Accepts either (page, address) or (address)
+ * Returns array of matched XHR URL strings
+ */
+async function findSquare(arg1, arg2) {
+  // Determine call style
+  let page = null;
+  let browser = null;
+  let address = null;
+  let createdBrowser = false;
 
-  // increase timeouts for slow environments
+  if (!arg1 && !arg2) {
+    throw new Error('address argument is required');
+  }
+
+  // If first arg is a string, caller used findSquare(address)
+  if (typeof arg1 === 'string' && (typeof arg2 === 'undefined' || arg2 === null)) {
+    address = arg1;
+    // create browser + page
+    browser = await puppeteer.launch({
+      headless: 'new',
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--single-process',
+        '--disable-blink-features=AutomationControlled'
+      ],
+      defaultViewport: { width: 1280, height: 800 },
+    });
+    createdBrowser = true;
+    page = await browser.newPage();
+  } else {
+    // assume (page, address)
+    page = arg1;
+    address = arg2;
+  }
+
+  if (!address) {
+    // cleanup if we started the browser
+    if (createdBrowser && browser) await browser.close().catch(()=>{});
+    throw new Error('address argument is required');
+  }
+  if (!page) {
+    if (createdBrowser && browser) await browser.close().catch(()=>{});
+    throw new Error('page not available');
+  }
+
+  // Set generous defaults & defenses
   page.setDefaultNavigationTimeout(60000);
   page.setDefaultTimeout(60000);
 
-  // Spoof UA and some automation indicators (helps against light bot checks)
   try {
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-    );
-  } catch (e) {}
+    try {
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+      );
+    } catch (e) {}
 
-  try {
-    await page.evaluateOnNewDocument(() => {
-      // navigator.webdriver
-      try {
-        Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      } catch (e) {}
-      // mock chrome
-      try { window.chrome = window.chrome || { runtime: {} }; } catch (e) {}
-      // permissions query patch
-      try {
-        const originalQuery = navigator.permissions && navigator.permissions.query;
-        if (originalQuery) {
-          navigator.permissions.query = parameters =>
-            parameters.name === 'notifications'
-              ? Promise.resolve({ state: Notification.permission })
-              : originalQuery(parameters);
-        }
-      } catch (e) {}
-    });
-  } catch (e) {}
+    try {
+      await page.evaluateOnNewDocument(() => {
+        try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch(e){}
+        try { window.chrome = window.chrome || { runtime: {} }; } catch(e){}
+        try {
+          const originalQuery = navigator.permissions && navigator.permissions.query;
+          if (originalQuery) {
+            navigator.permissions.query = parameters =>
+              parameters.name === 'notifications'
+                ? Promise.resolve({ state: Notification.permission })
+                : originalQuery(parameters);
+          }
+        } catch(e){}
+      });
+    } catch(e){}
+  } catch (e) {
+    // not fatal
+    console.log('Warning: failed to set stealth-like properties', e && e.message ? e.message : e);
+  }
 
-  // Collect matched XHR URLs
+  // Network capture
   const matched = new Set();
   const pattern = /square\?id=\d+/i;
 
-  // Attach network listeners
   const onRequest = req => {
     try {
       const url = req.url();
@@ -75,12 +120,12 @@ async function findSquare(page, address) {
   page.on('request', onRequest);
   page.on('response', onResponse);
 
-  // Navigate to the map and wait for network idle
+  // Visit page
   console.log('Navigating to map.coveragemap.com ...');
   await page.goto('https://map.coveragemap.com/', { waitUntil: 'networkidle2', timeout: 60000 });
   await page.waitForTimeout(1000);
 
-  // Try to dismiss likely overlays / cookie banners (non-blocking)
+  // Dismiss overlays
   const dismissors = [
     'svg.lucide-x', 'button[aria-label="close"]', 'button[aria-label="Close"]',
     'button[title="Close"]', '.cookie-consent button', '.cmp-close', '.close', '.dismiss'
@@ -94,7 +139,7 @@ async function findSquare(page, address) {
     } catch (e) {}
   }
 
-  // Candidate selectors (mix of XPath and CSS)
+  // Candidate selectors (XPath + CSS)
   const selectors = [
     '//*[@id="root"]//input[contains(@placeholder,"address") or contains(@placeholder,"Address") or contains(@placeholder,"location") or contains(@placeholder,"search")]',
     'input[placeholder*="address"]',
@@ -106,16 +151,14 @@ async function findSquare(page, address) {
     'input'
   ];
 
-  // Log frame URLs for debugging
+  // Frame logging
   try {
     const frames = page.frames();
     console.log('Frames count:', frames.length);
-    frames.forEach((f, i) => {
-      try { console.log(`  frame[${i}]: ${f.url()}`); } catch (e) {}
-    });
+    frames.forEach((f, i) => { try { console.log(`  frame[${i}]: ${f.url()}`); } catch (e) {} });
   } catch (e) {}
 
-  // Try find input in main frame first
+  // Find input
   let inputHandle = null;
   let foundBy = null;
 
@@ -123,27 +166,17 @@ async function findSquare(page, address) {
     try {
       if (sel.startsWith('//')) {
         const arr = await page.$x(sel);
-        if (arr && arr.length) {
-          inputHandle = arr[0];
-          foundBy = `xpath:${sel}`;
-          console.log('Found input via xpath:', sel);
-          break;
-        }
+        if (arr && arr.length) { inputHandle = arr[0]; foundBy = `xpath:${sel}`; console.log('Found input via xpath:', sel); break; }
       } else {
         const el = await page.$(sel);
-        if (el) {
-          inputHandle = el;
-          foundBy = `css:${sel}`;
-          console.log('Found input via css:', sel);
-          break;
-        }
+        if (el) { inputHandle = el; foundBy = `css:${sel}`; console.log('Found input via css:', sel); break; }
       }
     } catch (e) {
       console.log('Selector error', sel, e && e.message ? e.message : e);
     }
   }
 
-  // If not found, search inside frames
+  // Search inside frames if needed
   if (!inputHandle) {
     try {
       const allFrames = page.frames();
@@ -159,7 +192,7 @@ async function findSquare(page, address) {
             }
             if (h) {
               inputHandle = h;
-              foundBy = `frame(${f.url().slice(0, 120)})::${sel}`;
+              foundBy = `frame(${f.url().slice(0,120)})::${sel}`;
               console.log('Found input inside frame:', foundBy);
               break;
             }
@@ -172,7 +205,7 @@ async function findSquare(page, address) {
     }
   }
 
-  // Fallback: any visible input element
+  // Fallback visible input
   if (!inputHandle) {
     try {
       const visibleHandle = await page.evaluateHandle(() => {
@@ -180,14 +213,11 @@ async function findSquare(page, address) {
         for (const i of inputs) {
           const rect = i.getBoundingClientRect();
           const style = window.getComputedStyle(i);
-          if (rect.width > 20 && rect.height > 10 && style && style.visibility !== 'hidden' && style.display !== 'none') {
-            return i;
-          }
+          if (rect.width > 20 && rect.height > 10 && style && style.visibility !== 'hidden' && style.display !== 'none') return i;
         }
         return null;
       });
-      // Check if it's null
-      const isNull = await page.evaluate(h => h === null, visibleHandle).catch(() => false);
+      const isNull = await page.evaluate(h => h === null, visibleHandle).catch(()=>false);
       if (!isNull) {
         inputHandle = visibleHandle;
         foundBy = 'fallback:visible-input';
@@ -198,7 +228,7 @@ async function findSquare(page, address) {
     }
   }
 
-  // If still not found -> save debug artifacts and throw
+  // If no input found -> save debug artifacts & throw
   if (!inputHandle) {
     try {
       const debugPrefix = `/tmp/xhr_extractor_${Date.now()}`;
@@ -212,28 +242,21 @@ async function findSquare(page, address) {
       console.error('HTML snippet (first 2000 chars):', html.slice(0, 2000).replace(/\n/g, ' '));
     } catch (err) {
       console.error('Failed to write debug artifacts:', err && err.message ? err.message : err);
+    } finally {
+      try { page.removeListener('request', onRequest); page.removeListener('response', onResponse); } catch(e){}
+      if (createdBrowser && browser) await browser.close().catch(()=>{});
     }
-    // remove listeners before throwing
-    try { page.removeListener('request', onRequest); page.removeListener('response', onResponse); } catch (e) {}
     throw new Error('Search input not found on page');
   }
 
-  // Interact with the found input handle
-  try {
-    await inputHandle.focus();
-  } catch (e) {
-    // ignore; fallback below
-  }
+  // Interact with input
+  try { await inputHandle.focus(); } catch (e) {}
 
-  // Clear and type slowly (simulate human)
-  try {
-    await page.evaluate(el => { el.value = ''; el.focus(); }, inputHandle).catch(() => {});
-  } catch (e) {}
+  try { await page.evaluate(el => { el.value = ''; el.focus(); }, inputHandle).catch(()=>{}); } catch(e){}
 
   console.log('Typing address into input (foundBy:', foundBy, ')');
-  // If inputHandle supports .type (ElementHandle), use it; else fallback to keyboard
-  const useElementType = typeof inputHandle.type === 'function';
 
+  const useElementType = typeof inputHandle.type === 'function';
   if (useElementType) {
     try {
       await inputHandle.click({ clickCount: 3 }).catch(()=>{});
@@ -247,7 +270,6 @@ async function findSquare(page, address) {
 
   await page.waitForTimeout(900);
 
-  // Try to see if suggestions appear (common pattern)
   let suggestionsVisible = false;
   try {
     suggestionsVisible = await page.evaluate(() => !!document.querySelector('[role="listbox"], .suggestions, .autocomplete, .pac-container'));
@@ -255,21 +277,19 @@ async function findSquare(page, address) {
 
   if (suggestionsVisible) {
     try {
-      // click first suggestion if present
       await page.click('[role="listbox"] [role="option"], .suggestions li, .autocomplete li, .pac-container .pac-item', { timeout: 2000 }).catch(()=>{});
       await page.waitForTimeout(600);
     } catch (e) {
-      // fallback to enter
       try { await page.keyboard.press('Enter'); } catch (e2) {}
     }
   } else {
     try { await page.keyboard.press('Enter'); } catch (e) {}
   }
 
-  // Wait a bit for XHRs triggered by selection
+  // Wait for XHRs
   await page.waitForTimeout(1200);
 
-  // If still no matched XHRs, try clicking map center and small offsets to coax requests
+  // Map-click fallback to trigger XHRs
   if (matched.size === 0) {
     try {
       console.log('No matched XHRs yet. Attempting to click map to trigger requests...');
@@ -281,10 +301,7 @@ async function findSquare(page, address) {
           const cy = box.y + box.height / 2;
           const offsets = [[0,0],[10,0],[-10,0],[0,10],[0,-10],[20,0],[-20,0]];
           for (const [dx,dy] of offsets) {
-            try {
-              await page.mouse.click(cx + dx, cy + dy);
-              await page.waitForTimeout(700);
-            } catch (e) {}
+            try { await page.mouse.click(cx + dx, cy + dy); await page.waitForTimeout(700); } catch(e){}
             if (matched.size) break;
           }
         }
@@ -294,24 +311,26 @@ async function findSquare(page, address) {
     }
   }
 
-  // Wait a bit more for network events to be captured
   await page.waitForTimeout(700);
 
-  // Cleanup listeners
+  // cleanup listeners
   try { page.removeListener('request', onRequest); page.removeListener('response', onResponse); } catch (e) {}
 
   const result = Array.from(matched);
   console.log('findSquare result count:', result.length);
+
+  // Close browser if we created it
+  if (createdBrowser && browser) {
+    try { await browser.close(); } catch(e) {}
+  }
+
   return result;
 }
 
-// Export the function for server.js
+// Export
 module.exports = { findSquare };
 
-
-// ------------------------
-// If run directly, launch browser, create page, run findSquare
-// ------------------------
+// If run directly: launch and run in standalone mode
 if (require.main === module) {
   (async () => {
     const address = process.argv.slice(2).join(' ') || '316 E Okanogan Ave, Chelan Washington 98816';
@@ -320,7 +339,7 @@ if (require.main === module) {
     let browser = null;
     try {
       browser = await puppeteer.launch({
-        headless: false, // visible for local debugging; change to 'new' / true for CI
+        headless: false,
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -329,14 +348,11 @@ if (require.main === module) {
         ],
         defaultViewport: { width: 1280, height: 800 },
       });
-
       const page = await browser.newPage();
-
-      // Prepare page similarly to what findSquare expects
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
       await page.evaluateOnNewDocument(() => {
-        try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch (e) {}
-        try { window.chrome = window.chrome || { runtime: {} }; } catch (e) {}
+        try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch(e){}
+        try { window.chrome = window.chrome || { runtime: {} }; } catch(e){}
       });
 
       const results = await findSquare(page, address);
@@ -349,5 +365,6 @@ if (require.main === module) {
     }
   })();
 }
+
 
 module.exports = { findSquare };
