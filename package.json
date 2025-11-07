@@ -1,13 +1,26 @@
 {
   "name": "xhr-extractor",
   "version": "1.0.0",
+  "description": "Extract XHR URLs from map interactions using Puppeteer",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "postinstall": "npx puppeteer install --product=chrome"
+    "postinstall": "puppeteer browsers install chrome"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "puppeteer": "^24.0.0"
-  }
+    "puppeteer": "^24.0.0",
+    "puppeteer-core": "^24.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "xhr",
+    "puppeteer",
+    "scraper",
+    "api"
+  ],
+  "author": "",
+  "license": "MIT"
 }
