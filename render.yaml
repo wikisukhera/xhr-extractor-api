@@ -10,4 +10,6 @@ services:
         value: production
       - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
         value: false
+      - key: PUPPETEER_CACHE_DIR
+        value: ./puppeteer-cache
     healthCheckPath: /
