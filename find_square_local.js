@@ -1,18 +1,25 @@
 /**
- * find_square_local.js
+ * find_square_local.js (updated)
  *
  * Robust, instrumented helper to find/search an address on map.coveragemap.com
  * Flexible signature:
  *   - async findSquare(page, address)   // if you already have a puppeteer Page
  *   - async findSquare(address)         // function will launch/close its own browser/page
  *
- * Also runnable as a standalone script:
- *   node find_square_local.js "316 E Okanogan Ave, Chelan Washington 98816"
+ * Changes in this version:
+ * - Removed page.waitForTimeout usages and added delay(ms) helper to avoid "page.waitForTimeout is not a function"
+ * - Made navigation less brittle: try domcontentloaded first, handle navigation timeout without hard failure
+ * - Extra logging around navigation/timeouts and debug artifact capture
  */
 
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
+
+// simple delay helper (always works)
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 /**
  * Flexible findSquare
@@ -30,7 +37,6 @@ async function findSquare(arg1, arg2) {
     throw new Error('address argument is required');
   }
 
-  // If first arg is a string, caller used findSquare(address)
   if (typeof arg1 === 'string' && (typeof arg2 === 'undefined' || arg2 === null)) {
     address = arg1;
     // create browser + page
@@ -54,7 +60,6 @@ async function findSquare(arg1, arg2) {
   }
 
   if (!address) {
-    // cleanup if we started the browser
     if (createdBrowser && browser) await browser.close().catch(()=>{});
     throw new Error('address argument is required');
   }
@@ -63,36 +68,32 @@ async function findSquare(arg1, arg2) {
     throw new Error('page not available');
   }
 
-  // Set generous defaults & defenses
-  page.setDefaultNavigationTimeout(60000);
-  page.setDefaultTimeout(60000);
+  // Set generous defaults (if available)
+  try { page.setDefaultNavigationTimeout && page.setDefaultNavigationTimeout(60000); } catch(e) {}
+  try { page.setDefaultTimeout && page.setDefaultTimeout(60000); } catch(e) {}
+
+  // Try to set UA and some stealth-like properties
+  try {
+    await (page.setUserAgent ? page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+    ) : Promise.resolve());
+  } catch (e) {}
 
   try {
-    try {
-      await page.setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
-      );
-    } catch (e) {}
-
-    try {
-      await page.evaluateOnNewDocument(() => {
-        try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch(e){}
-        try { window.chrome = window.chrome || { runtime: {} }; } catch(e){}
-        try {
-          const originalQuery = navigator.permissions && navigator.permissions.query;
-          if (originalQuery) {
-            navigator.permissions.query = parameters =>
-              parameters.name === 'notifications'
-                ? Promise.resolve({ state: Notification.permission })
-                : originalQuery(parameters);
-          }
-        } catch(e){}
-      });
-    } catch(e){}
-  } catch (e) {
-    // not fatal
-    console.log('Warning: failed to set stealth-like properties', e && e.message ? e.message : e);
-  }
+    await (page.evaluateOnNewDocument ? page.evaluateOnNewDocument(() => {
+      try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch(e){}
+      try { window.chrome = window.chrome || { runtime: {} }; } catch(e){}
+      try {
+        const originalQuery = navigator.permissions && navigator.permissions.query;
+        if (originalQuery) {
+          navigator.permissions.query = parameters =>
+            parameters.name === 'notifications'
+              ? Promise.resolve({ state: Notification.permission })
+              : originalQuery(parameters);
+        }
+      } catch(e){}
+    }) : Promise.resolve());
+  } catch (e) {}
 
   // Network capture
   const matched = new Set();
@@ -117,25 +118,47 @@ async function findSquare(arg1, arg2) {
     } catch (e) {}
   };
 
-  page.on('request', onRequest);
-  page.on('response', onResponse);
+  page.on && page.on('request', onRequest);
+  page.on && page.on('response', onResponse);
 
-  // Visit page
+  // Navigate to the map with a robust strategy
   console.log('Navigating to map.coveragemap.com ...');
-  await page.goto('https://map.coveragemap.com/', { waitUntil: 'networkidle2', timeout: 60000 });
-  await page.waitForTimeout(1000);
+  let navigationTimedOut = false;
+  try {
+    // Prefer faster 'domcontentloaded' to avoid waiting forever for networkidle in CI
+    await page.goto('https://map.coveragemap.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  } catch (navErr) {
+    // If navigation times out, log and mark, but continue to attempt to interact/capture
+    navigationTimedOut = true;
+    console.warn('Navigation error or timeout (domcontentloaded). Will continue with best-effort. Error:', navErr && navErr.message ? navErr.message : navErr);
+    // Try to capture what we have so far (but continue)
+    try {
+      const debugPrefix = `/tmp/nav_timeout_${Date.now()}`;
+      const html = await (page.content ? page.content() : Promise.resolve('<no content>'));
+      const htmlPath = `${debugPrefix}.html`;
+      const shotPath = `${debugPrefix}.png`;
+      try { fs.writeFileSync(htmlPath, html); } catch(e){}
+      try { await (page.screenshot ? page.screenshot({ path: shotPath, fullPage: true }) : Promise.resolve()); } catch(e){}
+      console.warn('Saved partial navigation debug artifacts (paths):', htmlPath, shotPath);
+    } catch (e) {
+      console.error('Failed to save partial navigation artifacts:', e && e.message ? e.message : e);
+    }
+  }
 
-  // Dismiss overlays
+  // short delay to let inline JS run
+  await delay(1200);
+
+  // Try dismissing overlays (non-blocking)
   const dismissors = [
     'svg.lucide-x', 'button[aria-label="close"]', 'button[aria-label="Close"]',
     'button[title="Close"]', '.cookie-consent button', '.cmp-close', '.close', '.dismiss'
   ];
   for (const sel of dismissors) {
     try {
-      await page.evaluate(s => {
+      await (page.evaluate ? page.evaluate(s => {
         const el = document.querySelector(s);
-        if (el) el.click();
-      }, sel);
+        if (el) { try { el.click(); } catch(e){} }
+      }, sel) : Promise.resolve());
     } catch (e) {}
   }
 
@@ -151,9 +174,9 @@ async function findSquare(arg1, arg2) {
     'input'
   ];
 
-  // Frame logging
+  // Log frame URLs for debugging (if available)
   try {
-    const frames = page.frames();
+    const frames = page.frames ? page.frames() : [];
     console.log('Frames count:', frames.length);
     frames.forEach((f, i) => { try { console.log(`  frame[${i}]: ${f.url()}`); } catch (e) {} });
   } catch (e) {}
@@ -162,53 +185,47 @@ async function findSquare(arg1, arg2) {
   let inputHandle = null;
   let foundBy = null;
 
-  for (const sel of selectors) {
-    try {
-      if (sel.startsWith('//')) {
-        const arr = await page.$x(sel);
-        if (arr && arr.length) { inputHandle = arr[0]; foundBy = `xpath:${sel}`; console.log('Found input via xpath:', sel); break; }
-      } else {
-        const el = await page.$(sel);
-        if (el) { inputHandle = el; foundBy = `css:${sel}`; console.log('Found input via css:', sel); break; }
-      }
-    } catch (e) {
-      console.log('Selector error', sel, e && e.message ? e.message : e);
-    }
-  }
-
-  // Search inside frames if needed
-  if (!inputHandle) {
-    try {
-      const allFrames = page.frames();
-      for (const f of allFrames) {
-        for (const sel of selectors) {
-          try {
-            let h = null;
-            if (sel.startsWith('//')) {
-              const arr = await f.$x(sel);
-              if (arr && arr.length) h = arr[0];
-            } else {
-              h = await f.$(sel);
-            }
-            if (h) {
-              inputHandle = h;
-              foundBy = `frame(${f.url().slice(0,120)})::${sel}`;
-              console.log('Found input inside frame:', foundBy);
-              break;
-            }
-          } catch (e) {}
+  // Helper: try selectors in a given frame-like object
+  async function trySelectorsOnContext(context) {
+    for (const sel of selectors) {
+      try {
+        if (sel.startsWith('//')) {
+          const arr = (context.$x ? await context.$x(sel) : []);
+          if (arr && arr.length) return { handle: arr[0], foundBy: `xpath:${sel}` };
+        } else {
+          const el = (context.$ ? await context.$(sel) : null);
+          if (el) return { handle: el, foundBy: `css:${sel}` };
         }
-        if (inputHandle) break;
+      } catch (e) {
+        // ignore selector errors
       }
-    } catch (e) {
-      console.log('Frame search error', e && e.message ? e.message : e);
     }
+    return null;
   }
 
-  // Fallback visible input
+  // Try main page context
+  try {
+    const r = await trySelectorsOnContext(page);
+    if (r) { inputHandle = r.handle; foundBy = r.foundBy; console.log('Found input via main context:', foundBy); }
+  } catch (e) {}
+
+  // If not found, search frames
   if (!inputHandle) {
     try {
-      const visibleHandle = await page.evaluateHandle(() => {
+      const frames = page.frames ? page.frames() : [];
+      for (const f of frames) {
+        try {
+          const r = await trySelectorsOnContext(f);
+          if (r) { inputHandle = r.handle; foundBy = `frame(${(f.url && f.url() || '').slice(0,120)})::${r.foundBy}`; console.log('Found input inside frame:', foundBy); break; }
+        } catch (e) {}
+      }
+    } catch (e) {}
+  }
+
+  // Fallback: any visible input element
+  if (!inputHandle) {
+    try {
+      const visibleHandle = page.evaluateHandle ? await page.evaluateHandle(() => {
         const inputs = Array.from(document.querySelectorAll('input'));
         for (const i of inputs) {
           const rect = i.getBoundingClientRect();
@@ -216,105 +233,102 @@ async function findSquare(arg1, arg2) {
           if (rect.width > 20 && rect.height > 10 && style && style.visibility !== 'hidden' && style.display !== 'none') return i;
         }
         return null;
-      });
-      const isNull = await page.evaluate(h => h === null, visibleHandle).catch(()=>false);
-      if (!isNull) {
-        inputHandle = visibleHandle;
-        foundBy = 'fallback:visible-input';
-        console.log('Found input via fallback visible-input');
-      }
-    } catch (e) {
-      console.log('Visible input fallback failed', e && e.message ? e.message : e);
-    }
+      }) : null;
+      const isNull = visibleHandle ? await (page.evaluate ? page.evaluate(h => h === null, visibleHandle).catch(()=>false) : false) : true;
+      if (visibleHandle && !isNull) { inputHandle = visibleHandle; foundBy = 'fallback:visible-input'; console.log('Found input via fallback visible-input'); }
+    } catch (e) {}
   }
 
   // If no input found -> save debug artifacts & throw
   if (!inputHandle) {
     try {
       const debugPrefix = `/tmp/xhr_extractor_${Date.now()}`;
-      const html = await page.content();
+      const html = page.content ? await page.content() : '<no content>';
       const htmlPath = `${debugPrefix}.html`;
       const shotPath = `${debugPrefix}.png`;
-      fs.writeFileSync(htmlPath, html);
-      await page.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
+      try { fs.writeFileSync(htmlPath, html); } catch(e){}
+      try { await (page.screenshot ? page.screenshot({ path: shotPath, fullPage: true }) : Promise.resolve()); } catch(e){}
       console.error('Search input not found on page. Saved debug artifacts:', htmlPath, shotPath);
-      console.error('Page URL:', page.url());
-      console.error('HTML snippet (first 2000 chars):', html.slice(0, 2000).replace(/\n/g, ' '));
+      console.error('Page URL:', page.url ? page.url() : '<unknown>');
+      console.error('HTML snippet (first 2000 chars):', (html && html.slice ? html.slice(0,2000).replace(/\n/g,' ') : String(html)).slice(0,2000));
     } catch (err) {
       console.error('Failed to write debug artifacts:', err && err.message ? err.message : err);
     } finally {
-      try { page.removeListener('request', onRequest); page.removeListener('response', onResponse); } catch(e){}
+      page.removeListener && page.removeListener('request', onRequest);
+      page.removeListener && page.removeListener('response', onResponse);
       if (createdBrowser && browser) await browser.close().catch(()=>{});
     }
     throw new Error('Search input not found on page');
   }
 
-  // Interact with input
-  try { await inputHandle.focus(); } catch (e) {}
+  // Interact with the found input handle
+  try { inputHandle.focus && await inputHandle.focus(); } catch (e) {}
 
-  try { await page.evaluate(el => { el.value = ''; el.focus(); }, inputHandle).catch(()=>{}); } catch(e){}
+  try { await (page.evaluate ? page.evaluate(el => { el.value = ''; el.focus(); }, inputHandle).catch(()=>{}) : Promise.resolve()); } catch(e){}
 
   console.log('Typing address into input (foundBy:', foundBy, ')');
 
-  const useElementType = typeof inputHandle.type === 'function';
+  const useElementType = !!(inputHandle.type);
   if (useElementType) {
     try {
-      await inputHandle.click({ clickCount: 3 }).catch(()=>{});
-      await inputHandle.type(address, { delay: 80 });
+      await inputHandle.click && inputHandle.click({ clickCount: 3 }).catch(()=>{});
+      await inputHandle.type && inputHandle.type(address, { delay: 80 });
     } catch (e) {
-      try { await page.keyboard.type(address, { delay: 80 }); } catch (e2) {}
+      try { await page.keyboard && page.keyboard.type(address, { delay: 80 }); } catch (e2) {}
     }
   } else {
-    try { await page.keyboard.type(address, { delay: 80 }); } catch (e) {}
+    try { await page.keyboard && page.keyboard.type(address, { delay: 80 }); } catch (e) {}
   }
 
-  await page.waitForTimeout(900);
+  await delay(900);
 
   let suggestionsVisible = false;
   try {
-    suggestionsVisible = await page.evaluate(() => !!document.querySelector('[role="listbox"], .suggestions, .autocomplete, .pac-container'));
+    suggestionsVisible = await (page.evaluate ? page.evaluate(() => !!document.querySelector('[role="listbox"], .suggestions, .autocomplete, .pac-container')) : false);
   } catch (e) {}
 
   if (suggestionsVisible) {
     try {
-      await page.click('[role="listbox"] [role="option"], .suggestions li, .autocomplete li, .pac-container .pac-item', { timeout: 2000 }).catch(()=>{});
-      await page.waitForTimeout(600);
+      await (page.click ? page.click('[role="listbox"] [role="option"], .suggestions li, .autocomplete li, .pac-container .pac-item').catch(()=>{}) : Promise.resolve());
+      await delay(600);
     } catch (e) {
-      try { await page.keyboard.press('Enter'); } catch (e2) {}
+      try { await page.keyboard && page.keyboard.press('Enter'); } catch (e2) {}
     }
   } else {
-    try { await page.keyboard.press('Enter'); } catch (e) {}
+    try { await page.keyboard && page.keyboard.press('Enter'); } catch (e) {}
   }
 
-  // Wait for XHRs
-  await page.waitForTimeout(1200);
+  // Wait for XHRs triggered by selection
+  await delay(1200);
 
-  // Map-click fallback to trigger XHRs
+  // If still no matched XHRs, try clicking map center and offsets to coax requests
   if (matched.size === 0) {
     try {
       console.log('No matched XHRs yet. Attempting to click map to trigger requests...');
-      const mapElem = await page.$('div.leaflet-container') || await page.$('div.mapboxgl-canvas') || await page.$('canvas') || await page.$('#root');
+      const mapElem = (page.$ ? await page.$('div.leaflet-container') : null) || (page.$ ? await page.$('div.mapboxgl-canvas') : null) || (page.$ ? await page.$('canvas') : null) || (page.$ ? await page.$('#root') : null);
       if (mapElem) {
-        const box = await mapElem.boundingBox();
+        const box = await (mapElem.boundingBox ? mapElem.boundingBox() : null);
         if (box) {
           const cx = box.x + box.width / 2;
           const cy = box.y + box.height / 2;
           const offsets = [[0,0],[10,0],[-10,0],[0,10],[0,-10],[20,0],[-20,0]];
           for (const [dx,dy] of offsets) {
-            try { await page.mouse.click(cx + dx, cy + dy); await page.waitForTimeout(700); } catch(e){}
+            try { page.mouse && await page.mouse.click(cx + dx, cy + dy); await delay(700); } catch(e){}
             if (matched.size) break;
           }
         }
+      } else {
+        console.log('No map element found to click.');
       }
     } catch (e) {
       console.log('Map-click fallback error', e && e.message ? e.message : e);
     }
   }
 
-  await page.waitForTimeout(700);
+  await delay(700);
 
   // cleanup listeners
-  try { page.removeListener('request', onRequest); page.removeListener('response', onResponse); } catch (e) {}
+  try { page.removeListener && page.removeListener('request', onRequest); page.removeListener && page.removeListener('response', onResponse); } catch (e) {}
 
   const result = Array.from(matched);
   console.log('findSquare result count:', result.length);
@@ -349,8 +363,8 @@ if (require.main === module) {
         defaultViewport: { width: 1280, height: 800 },
       });
       const page = await browser.newPage();
-      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
-      await page.evaluateOnNewDocument(() => {
+      await page.setUserAgent && page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36');
+      await page.evaluateOnNewDocument && page.evaluateOnNewDocument(() => {
         try { Object.defineProperty(navigator, 'webdriver', { get: () => false }); } catch(e){}
         try { window.chrome = window.chrome || { runtime: {} }; } catch(e){}
       });
@@ -365,6 +379,5 @@ if (require.main === module) {
     }
   })();
 }
-
 
 module.exports = { findSquare };
