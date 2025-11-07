@@ -1,5 +1,5 @@
 // find_square_local.js
-// Optimized for Render.com - Uses local Chromium first
+// Optimized for Render.com - Uses local Chromium
 
 const PUPPETEER_CORE = require('puppeteer-core');
 
@@ -21,8 +21,7 @@ async function connectBrowser() {
         '--disable-features=IsolateOrigins,site-per-process',
         '--single-process',
         '--no-zygote'
-      ],
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined
+      ]
     });
     
     console.log('Successfully launched local Chromium');
