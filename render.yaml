@@ -1,6 +1,0 @@
-services:
-  - type: web
-    name: xhr-extractor
-    env: node
-    buildCommand: ./render-build.sh
-    startCommand: npm start
