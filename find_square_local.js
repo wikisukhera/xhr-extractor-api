@@ -51,17 +51,24 @@ async function findSquare(arg1, arg2) {
     const forceHeadful = !!(process.env.RENDER_HEADFUL && process.env.RENDER_HEADFUL !== 'false' && process.env.RENDER_HEADFUL !== '0');
     const headlessMode = forceHeadful ? false : 'new';
     browser = await puppeteer.launch({
-      headless: headlessMode,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-gpu',
-        '--window-size=1280,800'
-      ],
-      defaultViewport: { width: 1280, height: 800 },
-    });
+  headless: headlessMode, // 'new' or false by env
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-gpu',
+    '--window-size=1280,800',
+    '--ignore-gpu-blacklist',
+    '--use-gl=swiftshader',
+    '--enable-webgl',
+    '--enable-unsafe-webgl',
+    '--enable-accelerated-2d-canvas',
+    '--enable-gpu-rasterization',
+    '--disable-software-rasterizer'
+  ],
+  defaultViewport: { width: 1280, height: 800 },
+});
     createdBrowser = true;
     page = await browser.newPage();
   } else {
