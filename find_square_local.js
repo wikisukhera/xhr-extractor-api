@@ -29,6 +29,9 @@ async function findSquare(address) {
 
   // Fall back to local Chrome if Browserless not available or failed
   if (!browser) {
+    // Set correct cache path for Render
+    process.env.PUPPETEER_CACHE_DIR = process.env.PUPPETEER_CACHE_DIR || './puppeteer-cache';
+    
     browser = await puppeteer.launch({
       headless: 'new',
       args: [
