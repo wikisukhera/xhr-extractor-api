@@ -1,10 +1,14 @@
 {
   "name": "xhr-extractor-api",
   "version": "1.0.0",
+  "license": "MIT",
   "main": "server.js",
-  "scripts": { "start": "node server.js" },
+  "scripts": {
+    "start": "node server.js",
+    "postinstall": "npx puppeteer browsers install chrome --platform=linux"
+  },
   "dependencies": {
     "express": "^4.19.2",
-    "puppeteer": "^23.5.0"
+    "puppeteer": "^22.15.0"
   }
 }
