@@ -1,145 +1,252 @@
-// find_square_local.js — Render.com PROVEN VERSION
+// find_square_local.js — Your original working version (local + CLI intact)
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+
+function delay(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 async function findSquare(address) {
-  if (!address) throw new Error('Address is required');
-
-  console.log('Launching browser...');
-  let browser;
-  try {
-    const browser = await puppeteer.launch({
-  headless: 'new',
-  executablePath: '/opt/render/project/src/.puppeteer_cache/chrome/linux-121.0.6167.85/chrome-linux64/chrome',  // <<< COPY FROM LOGS
-  args: [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--use-gl=swiftshader',
-    '--ignore-gpu-blocklist',
-    '--max_old_space_size=256'
-  ],
-  defaultViewport: { width: 1280, height: 800 },
-  timeout: 60000
-});
-  } catch (err) {
-    console.error('Browser launch failed:', err.message);
-    throw new Error(`Browser failed: ${err.message}`);
+  if (!address) {
+    throw new Error('address parameter is required');
   }
+
+  console.log('Launching browser for address:', address);
+
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--single-process',
+      '--no-zygote'
+    ],
+    defaultViewport: {
+      width: 1280,
+      height: 800
+    }
+  });
 
   const page = await browser.newPage();
 
-  // XHR tracking
+  // Set user agent
+  await page.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+  );
+
+  // Basic stealth
+  await page.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => false
+    });
+    window.chrome = {
+      runtime: {}
+    };
+  });
+
+  // Track XHR requests
   const matched = new Set();
   const pattern = /square\?id=\d+/i;
 
   page.on('request', req => {
-    const url = req.url();
-    if (pattern.test(url)) {
-      matched.add(url);
-      console.log(`[XHR] ${url}`);
-    }
-  });
-
-  page.on('response', resp => {
-    const url = resp.url();
-    if (pattern.test(url)) {
-      matched.add(url);
-      console.log(`[XHR RES] ${url}`);
-    }
-  });
-
-  try {
-    console.log('Navigating...');
-    await page.goto('https://map.coveragemap.com/', {
-      waitUntil: 'networkidle2',
-      timeout: 60000
-    });
-
-    // Optional: Verify WebGL
-    const webgl = await page.evaluate(() => {
-      const canvas = document.createElement('canvas');
-      return !!(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'));
-    });
-    console.log(`WebGL enabled: ${webgl}`);
-
-    // Dismiss popup
     try {
-      await page.waitForSelector('svg.lucide-x', { timeout: 3000 });
-      await page.click('svg.lucide-x');
-      await delay(500);
-    } catch (_) {}
-
-    // Find input
-    const input = await page.waitForSelector('input[placeholder*="address"], input[type="search"], #root input, input', { timeout: 10000 });
-    if (!input) throw new Error('Input not found');
-
-    await input.click({ clickCount: 3 });
-    await input.press('Backspace');
-    await input.type(address, { delay: 80 });
-
-    await delay(1200);
-
-    const hasSuggestions = await page.evaluate(() => !!document.querySelector('[role="listbox"]'));
-    console.log(`Suggestions: ${hasSuggestions}`);
-
-    if (!hasSuggestions) {
-      await input.press('Enter');
-      await delay(1000);
-    } else {
-      try {
-        await page.click('[role="listbox"] [role="option"]');
-        await delay(600);
-      } catch (_) {
-        await input.press('Enter');
+      const url = req.url();
+      if (pattern.test(url)) {
+        matched.add(url);
+        console.log('[MATCHED REQUEST]', url);
       }
+    } catch (e) {}
+  });
+
+  page.on('response', async resp => {
+    try {
+      const url = resp.url();
+      if (pattern.test(url)) {
+        matched.add(url);
+        console.log('[MATCHED RESPONSE]', url);
+      }
+    } catch (e) {}
+  });
+
+  // Navigate
+  console.log('Navigating to map...');
+  await page.goto('https://map.coveragemap.com/', {
+    waitUntil: 'networkidle2',
+    timeout: 60000
+  });
+
+  await delay(1500);
+
+  // Dismiss popup
+  try {
+    await page.waitForSelector('svg.lucide-x', { timeout: 3000 });
+    await page.click('svg.lucide-x');
+    await delay(600);
+  } catch (e) {}
+
+  // Find input
+  const selectors = [
+    '//*[@id="root"]//input[contains(@placeholder,"address") or contains(@placeholder,"Address")]',
+    'input[placeholder*="address"]',
+    'input[placeholder*="Address"]',
+    'input[type="search"]',
+    '#root input',
+    'input'
+  ];
+
+  let inputHandle = null;
+  for (const sel of selectors) {
+    try {
+      if (sel.startsWith('//')) {
+        const [el] = await page.$x(sel);
+        if (el) {
+          inputHandle = el;
+          console.log('Found input via XPath');
+          break;
+        }
+      } else {
+        const el = await page.$(sel);
+        if (el) {
+          inputHandle = el;
+          console.log('Found input via CSS:', sel);
+          break;
+        }
+      }
+    } catch (e) {}
+  }
+
+  if (!inputHandle) {
+    await browser.close();
+    throw new Error('Search input not found on page');
+  }
+
+  // Focus and clear
+  await inputHandle.focus();
+  await page.evaluate(el => {
+    el.value = '';
+    el.focus();
+  }, inputHandle);
+
+  console.log('Typing address...');
+
+  // Type character by character
+  for (const ch of address) {
+    await inputHandle.type(ch, { delay: 80 });
+  }
+
+  await delay(1200);
+
+  // Check for suggestions
+  let suggestionsVisible = await page.evaluate(() => !!document.querySelector('[role="listbox"]') );
+  console.log('Suggestions visible:', suggestionsVisible);
+
+  // Backspace trick
+  if (!suggestionsVisible) {
+    console.log('Trying backspace trick...');
+    for (const n of [1, 2]) {
+      for (let i = 0; i < n; i++) {
+        await inputHandle.press('Backspace');
+        await delay(80);
+      }
+
+      for (let i = 0; i < n; i++) {
+        await inputHandle.press('ArrowLeft');
+        await delay(80);
+      }
+
+      await page.evaluate(el => el.dispatchEvent(new Event('input', { bubbles: true })), inputHandle );
+
+      await delay(900);
+
+      suggestionsVisible = await page.evaluate(() => !!document.querySelector('[role="listbox"]') );
+      console.log(`Suggestions after trick (${n} chars):`, suggestionsVisible);
+
+      if (suggestionsVisible) break;
     }
+  }
 
-    await delay(800);
+  // Click suggestion or press Enter
+  if (suggestionsVisible) {
+    try {
+      await page.click('[role="listbox"] [role="option"]');
+      console.log('Clicked first suggestion');
+      await delay(600);
+    } catch (e) {
+      await inputHandle.press('Enter');
+      await delay(1000);
+    }
+  } else {
+    await inputHandle.press('Enter');
+    await delay(1000);
+  }
 
-    // Click map if no XHR yet
-    if (matched.size === 0) {
-      console.log('Clicking map...');
-      const map = await page.$('div.leaflet-container, canvas');
-      if (map) {
-        const box = await map.boundingBox();
+  // Wait for XHR
+  await delay(800);
+
+  // If no matches, click the map
+  if (matched.size === 0) {
+    console.log('No matches yet, clicking map...');
+    const mapElem = await page.$('div.leaflet-container') ||
+                    await page.$('div.mapboxgl-canvas') ||
+                    await page.$('canvas') ||
+                    await page.$('#root');
+
+    if (mapElem) {
+      const box = await mapElem.boundingBox();
+      if (box) {
         const cx = box.x + box.width / 2;
         const cy = box.y + box.height / 2;
-        await page.mouse.click(cx, cy);
-        await delay(1200);
+
+        const offsets = [
+          [0, 0],
+          [10, 0], [-10, 0],
+          [0, 10], [0, -10],
+          [20, 0], [-20, 0],
+          [10, 10], [-10, -10]
+        ];
+
+        for (const [dx, dy] of offsets) {
+          try {
+            await page.mouse.click(cx + dx, cy + dy);
+            console.log(`Clicked at offset (${dx}, ${dy})`);
+            await delay(800);
+            if (matched.size) break;
+          } catch (e) {}
+        }
       }
     }
-
-    await delay(1000);
-    const result = Array.from(matched);
-    console.log(`Found ${result.length} XHR(s)`);
-    return result;
-
-  } catch (err) {
-    console.error('Page error:', err.message);
-    throw err;
-  } finally {
-    if (browser) await browser.close().catch(() => {});
   }
-}
 
-function delay(ms) {
-  return new Promise(r => setTimeout(r, ms));
+  // Final wait
+  await delay(600);
+
+  const result = Array.from(matched);
+  console.log('Found', result.length, 'matching URLs');
+
+  await browser.close();
+
+  return result;
 }
 
 module.exports = { findSquare };
 
-// CLI
+// Standalone mode
 if (require.main === module) {
-  const address = process.argv.slice(2).join(' ');
-  if (!address) {
-    console.error('Usage: node find_square_local.js "address"');
-    process.exit(1);
-  }
-  findSquare(address)
-    .then(res => console.log(JSON.stringify({ xhrUrls: res }, null, 2)))
-    .catch(err => {
-      console.error('Failed:', err.message);
+  (async () => {
+    const address = process.argv.slice(2).join(' ');
+    if (!address) {
+      console.error('Usage: node find_square_local.js "your address here"');
       process.exit(1);
-    });
+    }
+
+    try {
+      const results = await findSquare(address);
+      console.log(JSON.stringify({ xhrUrls: results }, null, 2));
+      process.exit(0);
+    } catch (err) {
+      console.error('Error:', err.message);
+      process.exit(1);
+    }
+  })();
 }
