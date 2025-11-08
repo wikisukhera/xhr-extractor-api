@@ -5,10 +5,13 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "postinstall": "npx puppeteer browsers install chrome --platform=linux"
+    "postinstall": "echo 'Postinstall skipped - manual in buildCommand'"
   },
   "dependencies": {
     "express": "^4.19.2",
-    "puppeteer": "^22.15.0"
+    "puppeteer": "^21.11.0"
+  },
+  "devDependencies": {
+    "@puppeteer/browsers": "^1.9.0"
   }
 }
