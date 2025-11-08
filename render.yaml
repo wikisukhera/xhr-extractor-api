@@ -2,12 +2,5 @@ services:
   - type: web
     name: xhr-extractor
     env: node
-    envVars:
-      - key: PUPPETEER_SKIP_DOWNLOAD
-        value: "true"
-      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
-        value: "true"
-      - key: PUPPETEER_CACHE_DIR
-        value: "/opt/render/project/src/.puppeteer_cache"
-    buildCommand: PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_CACHE_DIR=/opt/render/project/src/.puppeteer_cache yarn install --network-timeout 100000 && PUPPETEER_CACHE_DIR=/opt/render/project/src/.puppeteer_cache npx @puppeteer/browsers install chrome@120.0.6099.234
-    startCommand: yarn start
+    buildCommand: ./render-build.sh
+    startCommand: npm start
