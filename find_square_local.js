@@ -13,20 +13,22 @@ async function findSquare(address) {
 
   console.log('Launching browser for address:', address);
 
-  const browser = await puppeteer.launch({
-    headless: 'new',
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--single-process',
-      '--no-zygote'
-    ],
-    defaultViewport: {
-      width: 1280,
-      height: 800
-    }
-  });
+  // Your original code here (full from <DOCUMENT>, unchanged except puppeteer.launch block below)
+
+const browser = await puppeteer.launch({
+  headless: 'new',
+  executablePath: process.env.NODE_ENV === 'production' ? '/opt/render/project/src/node_modules/.cache/puppeteer/chrome/linux-*/chrome' : undefined,
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--use-gl=swiftshader',
+    '--ignore-gpu-blocklist',
+    '--max_old_space_size=256'
+  ],
+  defaultViewport: { width: 1280, height: 800 }
+});
 
   const page = await browser.newPage();
 
