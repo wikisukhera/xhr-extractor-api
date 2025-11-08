@@ -10,7 +10,7 @@
  *  - As module: const { findSquare } = require('./find_square_local');
  *  - Standalone: node find_square_local.js "120 Broadway, Floor 8, New York, NY 10271"
  */
-
+const DEFAULT_VIEWPORT = { width: 1280, height: 800 };
 const fs = require('fs');
 const path = require('path');
 const puppeteer = require('puppeteer');
@@ -49,17 +49,30 @@ async function findSquare(arg1, arg2) {
     address = arg1;
     // choose headless vs headful based on env toggle for parity testing
     const forceHeadful = !!(process.env.RENDER_HEADFUL && process.env.RENDER_HEADFUL !== 'false' && process.env.RENDER_HEADFUL !== '0');
-    const headlessMode = forceHeadful ? false : 'new';
-    browser = await puppeteer.launch({
-  headless: 'new', // use 'new' headless by default (matches modern Puppeteer)
+    const HEADLESS = (process.env.HEADLESS || 'true').toLowerCase() !== 'false';
+
+// Launch options safe for headless Linux containers (Render)
+const launchOptions = {
+  headless: HEADLESS ? 'new' : false, // use 'new' headless when true
   args: [
     '--no-sandbox',
     '--disable-setuid-sandbox',
     '--disable-dev-shm-usage',
-    '--disable-blink-features=AutomationControlled'
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--disable-accelerated-2d-canvas',
+    '--disable-accelerated-video',
+    '--disable-features=VizDisplayCompositor,WebGL,WebGL2,Accelerated2dCanvas',
+    '--no-first-run',
+    '--no-zygote',
+    '--single-process' // optional, sometimes helps in constrained runners
   ],
-  defaultViewport: { width: 1280, height: 800 },
-});
+  defaultViewport: DEFAULT_VIEWPORT,
+  // If you're using puppeteer-core with installed browsers: ensure executablePath (optional)
+  // executablePath: puppeteer.executablePath?.() || undefined
+};
+
+const browser = await puppeteer.launch(launchOptions);
     createdBrowser = true;
     page = await browser.newPage();
   } else {
