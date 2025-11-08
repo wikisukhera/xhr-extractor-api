@@ -7,24 +7,21 @@ async function findSquare(address) {
   console.log('Launching browser...');
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: 'new',
-      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH,
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
-        '--use-gl=swiftshader',
-        '--ignore-gpu-blocklist',
-        '--disable-software-rasterizer',
-        '--memory-pressure-off',
-        '--max_old_space_size=256'
-      ],
-      defaultViewport: { width: 1280, height: 800 },
-      timeout: 60000
-    });
+    const browser = await puppeteer.launch({
+  headless: 'new',
+  executablePath: '/opt/render/project/src/.puppeteer_cache/chrome/linux-121.0.6167.85/chrome-linux64/chrome',  // <<< COPY FROM LOGS
+  args: [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--use-gl=swiftshader',
+    '--ignore-gpu-blocklist',
+    '--max_old_space_size=256'
+  ],
+  defaultViewport: { width: 1280, height: 800 },
+  timeout: 60000
+});
   } catch (err) {
     console.error('Browser launch failed:', err.message);
     throw new Error(`Browser failed: ${err.message}`);
