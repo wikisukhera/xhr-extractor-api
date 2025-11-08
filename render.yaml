@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: xhr-extractor
+    env: node
+    plan: starter
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: false
+      - key: PUPPETEER_CACHE_DIR
+        value: ./puppeteer-cache
+    healthCheckPath: /
