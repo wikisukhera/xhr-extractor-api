@@ -1,4 +1,5 @@
-// find_square_local.js — Your original working version (local + CLI intact)
+// find_square_local.js
+// Proven working version - combines best of local and online approaches
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 
@@ -13,22 +14,17 @@ async function findSquare(address) {
 
   console.log('Launching browser for address:', address);
 
-  // Your original code here (full from <DOCUMENT>, unchanged except puppeteer.launch block below)
-
-const browser = await puppeteer.launch({
-  headless: 'new',
-  executablePath: process.env.NODE_ENV === 'production' ? '/opt/render/project/src/node_modules/.cache/puppeteer/chrome/linux-*/chrome' : undefined,
-  args: [
-    '--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-gpu',
-    '--use-gl=swiftshader',
-    '--ignore-gpu-blocklist',
-    '--max_old_space_size=256'
-  ],
-  defaultViewport: { width: 1280, height: 800 }
-});
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--single-process',
+      '--no-zygote'
+    ],
+    defaultViewport: { width: 1280, height: 800 }
+  });
 
   const page = await browser.newPage();
 
@@ -39,12 +35,8 @@ const browser = await puppeteer.launch({
 
   // Basic stealth
   await page.evaluateOnNewDocument(() => {
-    Object.defineProperty(navigator, 'webdriver', {
-      get: () => false
-    });
-    window.chrome = {
-      runtime: {}
-    };
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+    window.chrome = { runtime: {} };
   });
 
   // Track XHR requests
@@ -125,14 +117,11 @@ const browser = await puppeteer.launch({
 
   // Focus and clear
   await inputHandle.focus();
-  await page.evaluate(el => {
-    el.value = '';
-    el.focus();
-  }, inputHandle);
+  await page.evaluate(el => { el.value = ''; el.focus(); }, inputHandle);
 
   console.log('Typing address...');
-
-  // Type character by character
+  
+  // Type character by character (this is proven to work)
   for (const ch of address) {
     await inputHandle.type(ch, { delay: 80 });
   }
@@ -140,30 +129,36 @@ const browser = await puppeteer.launch({
   await delay(1200);
 
   // Check for suggestions
-  let suggestionsVisible = await page.evaluate(() => !!document.querySelector('[role="listbox"]') );
+  let suggestionsVisible = await page.evaluate(() =>
+    !!document.querySelector('[role="listbox"]')
+  );
   console.log('Suggestions visible:', suggestionsVisible);
 
-  // Backspace trick
+  // THIS IS THE KEY PART - backspace trick that makes it work
   if (!suggestionsVisible) {
     console.log('Trying backspace trick...');
     for (const n of [1, 2]) {
+      // Backspace n characters
       for (let i = 0; i < n; i++) {
         await inputHandle.press('Backspace');
         await delay(80);
       }
-
+      // Move cursor left
       for (let i = 0; i < n; i++) {
         await inputHandle.press('ArrowLeft');
         await delay(80);
       }
-
-      await page.evaluate(el => el.dispatchEvent(new Event('input', { bubbles: true })), inputHandle );
-
+      // Trigger input event
+      await page.evaluate(el =>
+        el.dispatchEvent(new Event('input', { bubbles: true })),
+        inputHandle
+      );
       await delay(900);
 
-      suggestionsVisible = await page.evaluate(() => !!document.querySelector('[role="listbox"]') );
+      suggestionsVisible = await page.evaluate(() =>
+        !!document.querySelector('[role="listbox"]')
+      );
       console.log(`Suggestions after trick (${n} chars):`, suggestionsVisible);
-
       if (suggestionsVisible) break;
     }
   }
@@ -189,10 +184,11 @@ const browser = await puppeteer.launch({
   // If no matches, click the map
   if (matched.size === 0) {
     console.log('No matches yet, clicking map...');
+    
     const mapElem = await page.$('div.leaflet-container') ||
-                    await page.$('div.mapboxgl-canvas') ||
-                    await page.$('canvas') ||
-                    await page.$('#root');
+                     await page.$('div.mapboxgl-canvas') ||
+                     await page.$('canvas') ||
+                     await page.$('#root');
 
     if (mapElem) {
       const box = await mapElem.boundingBox();
@@ -200,12 +196,10 @@ const browser = await puppeteer.launch({
         const cx = box.x + box.width / 2;
         const cy = box.y + box.height / 2;
 
+        // Click at various offsets
         const offsets = [
-          [0, 0],
-          [10, 0], [-10, 0],
-          [0, 10], [0, -10],
-          [20, 0], [-20, 0],
-          [10, 10], [-10, -10]
+          [0, 0], [10, 0], [-10, 0], [0, 10], [0, -10],
+          [20, 0], [-20, 0], [10, 10], [-10, -10]
         ];
 
         for (const [dx, dy] of offsets) {
@@ -227,7 +221,6 @@ const browser = await puppeteer.launch({
   console.log('Found', result.length, 'matching URLs');
 
   await browser.close();
-
   return result;
 }
 
@@ -238,7 +231,7 @@ if (require.main === module) {
   (async () => {
     const address = process.argv.slice(2).join(' ');
     if (!address) {
-      console.error('Usage: node find_square_local.js "your address here"');
+      console.error('Usage: node find_square_local.js "<address>"');
       process.exit(1);
     }
 
