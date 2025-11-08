@@ -15,7 +15,7 @@ async function findSquare(address) {
   if (process.env.BROWSERLESS_API_KEY) {
     try {
       console.log('Attempting to connect to Browserless...');
-      const endpoint = `wss://chrome.browserless.io?token=${process.env.BROWSERLESS_API_KEY}`;
+      const endpoint = `wss://production-sfo.browserless.io?token=${process.env.BROWSERLESS_API_KEY}`;
       browser = await puppeteerCore.connect({ 
         browserWSEndpoint: endpoint 
       });
